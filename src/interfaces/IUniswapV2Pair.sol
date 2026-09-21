@@ -7,10 +7,14 @@ pragma solidity 0.8.34;
  * @notice Exposes token addresses and reserves for a liquidity pair.
  */
 interface IUniswapV2Pair {
-    /** @notice Returns the address of the first token in the pair. */
+    /**
+     * @notice Returns the address of the first token in the pair.
+     */
     function token0() external view returns (address);
 
-    /** @notice Returns the address of the second token in the pair. */
+    /**
+     * @notice Returns the address of the second token in the pair.
+     */
     function token1() external view returns (address);
 
     /**

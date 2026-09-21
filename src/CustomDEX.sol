@@ -2,9 +2,10 @@
 
 pragma solidity 0.8.34;
 
-import "./interfaces/IUniswapV2Router02.sol";
-import "../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
-import "../lib/openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol";
+import { IUniswapV2Router02 } from "./interfaces/IUniswapV2Router02.sol";
+import { IUniswapV2Factory } from "./interfaces/IUniswapV2Factory.sol";
+import { IERC20 } from "../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
+import { SafeERC20 } from "../lib/openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol";
 
 /**
  * @title Custom DEX
@@ -13,25 +14,44 @@ import "../lib/openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol"
 contract CustomDEX {
     using SafeERC20 for IERC20;
 
-    /** @notice Address of the Uniswap V2 router used for swaps and liquidity operations. */
+    /**
+     * @notice Address of the Uniswap V2 router used for swaps and liquidity operations.
+     */
     address public immutable UNISWAP_V2_ROUTER_ADDRESS;
 
-    /** @notice Address of the NFT collection associated with this deployment. */
+    /**
+     * @notice Address of the Uniswap V2 factory used for getting pair addresses.
+     */
+    address public immutable UNISWAP_V2_FACTORY_ADDRESS;
+
+    /**
+     * @notice Address of the NFT collection associated with this deployment.
+     */
     address public immutable nftDavidCollection;
 
-    /** @notice Emitted when tokens are swapped through the configured router. */
+    /**
+     * @notice Emitted when tokens are swapped through the configured router.
+     */
     event SwapTokens(address indexed tokenIn, address indexed tokenOut, uint256 amountIn, uint256 amountOut);
 
-    /** @notice Emitted when liquidity is added and LP tokens are minted for the caller. */
+    /**
+     * @notice Emitted when liquidity is added and LP tokens are minted for the caller.
+     */
     event AddLPTokens(address indexed tokenA_, address indexed tokenB_, uint256 lpTokensAmount);
+
+    /**
+     * @notice Emitted when liquidity is removed and LP tokens are burned to get the tokens back.
+     */
+    event RemoveLPTokens(address indexed tokenA, address indexed tokenB, uint256 liquidity, uint256 amountA, uint256 amountB);
 
     /**
      * @notice Initializes the DEX with a Uniswap V2 router and an NFT collection address.
      * @param uniswapV2RouterAddress_ Address of the Uniswap V2 router to use.
      * @param nftDavidCollection_ Address of the associated NFT collection.
      */
-    constructor(address uniswapV2RouterAddress_, address nftDavidCollection_) {
-        require(uniswapV2RouterAddress_ != address(0) && nftDavidCollection_ != address(0), "Zero address");
+    constructor(address uniswapV2RouterAddress_, address uniswapV2FactoryAddress_, address nftDavidCollection_) {
+        require(uniswapV2RouterAddress_ != address(0) && uniswapV2FactoryAddress_ != address(0) && nftDavidCollection_ != address(0), "Zero address");
+        UNISWAP_V2_FACTORY_ADDRESS = uniswapV2FactoryAddress_;
         UNISWAP_V2_ROUTER_ADDRESS = uniswapV2RouterAddress_;
         nftDavidCollection = nftDavidCollection_;
     }
@@ -82,8 +102,8 @@ contract CustomDEX {
         IERC20(tokenA_).safeTransferFrom(msg.sender, address(this), amountADesired_);
         IERC20(tokenB_).safeTransferFrom(msg.sender, address(this), amountBDesired_);
 
-        IERC20(tokenA_).approve(UNISWAP_V2_ROUTER_ADDRESS, amountADesired_);
-        IERC20(tokenB_).approve(UNISWAP_V2_ROUTER_ADDRESS, amountBDesired_);
+        IERC20(tokenA_).forceApprove(UNISWAP_V2_ROUTER_ADDRESS, amountADesired_);
+        IERC20(tokenB_).forceApprove(UNISWAP_V2_ROUTER_ADDRESS, amountBDesired_);
         (uint256 amountA, uint256 amountB, uint256 liquidity) = IUniswapV2Router02(UNISWAP_V2_ROUTER_ADDRESS)
             .addLiquidity(
                 tokenA_, tokenB_, amountADesired_, amountBDesired_, amountAMin_, amountBMin_, msg.sender, deadline_
@@ -99,5 +119,37 @@ contract CustomDEX {
 
         lpTokensAmount = liquidity;
         emit AddLPTokens(tokenA_, tokenB_, lpTokensAmount);
+    }
+
+    /**
+     * @notice Removes liquidity from a Uniswap V2 pair and sends the underlying tokens to the caller.
+     * @dev The caller must approve this contract to spend `liquidity_` LP tokens for the pair. The router enforces the minimum return amounts.
+     * @param tokenA_ Address of the first token in the liquidity pair.
+     * @param tokenB_ Address of the second token in the liquidity pair.
+     * @param liquidity_ Amount of LP tokens to burn from the caller.
+     * @param amountAMin_ Minimum amount of the first token to receive.
+     * @param amountBMin_ Minimum amount of the second token to receive.
+     * @param deadline_ Unix timestamp after which the liquidity removal must not execute.
+     * @return amountA_ Amount of the first token returned to the caller.
+     * @return amountB_ Amount of the second token returned to the caller.
+     */
+    function removeLiquidity(
+        address tokenA_,
+        address tokenB_,
+        uint256 liquidity_,
+        uint256 amountAMin_,
+        uint256 amountBMin_,
+        uint256 deadline_
+    ) external returns (uint256 amountA_, uint256 amountB_) {
+        address pair_ = IUniswapV2Factory(UNISWAP_V2_FACTORY_ADDRESS).getPair(tokenA_, tokenB_);
+        require(pair_ != address(0), "Pair not found");
+
+        IERC20(pair_).safeTransferFrom(msg.sender, address(this), liquidity_);
+        IERC20(pair_).forceApprove(UNISWAP_V2_ROUTER_ADDRESS, liquidity_);
+
+        (amountA_, amountB_) = IUniswapV2Router02(UNISWAP_V2_ROUTER_ADDRESS)
+            .removeLiquidity(tokenA_, tokenB_, liquidity_, amountAMin_, amountBMin_, msg.sender, deadline_);
+        
+        emit RemoveLPTokens(tokenA_, tokenB_, liquidity_, amountA_, amountB_);
     }
 }
