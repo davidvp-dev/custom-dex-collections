@@ -60,35 +60,16 @@ contract CustomDEXTest is Test {
     }
 
     function testAddLiquidityOK() public {
-        // LP using USDC and ARB
-        address[] memory path = new address[](2);
-        path[0] = USDC;
-        path[1] = ARB;
-        uint256 amountADesired = 10 * 1e6; // 10 USDC paired with ? ARB
-
         vm.startPrank(user);
-        // ---- This is what a frontend would do to calculate each parameter for addLiquidity() function ----
-        // 1. first find the pair
+
+        uint256 amountADesired = 10 * 1e6; // 10 USDC paired with ? ARB
         address pair = IUniswapV2Factory(UNISWAP_V2_FACTORY).getPair(USDC, ARB);
         assert(pair != address(0));
 
-        // 2. then read reserves and order by tokenA/tokenB (getReserves() order can be different)
-        (uint112 reserve0, uint112 reserve1,) = IUniswapV2Pair(pair).getReserves();
-        address token0 = IUniswapV2Pair(pair).token0();
-        (uint256 reserveA, uint256 reserveB) =
-            token0 == USDC ? (uint256(reserve0), uint256(reserve1)) : (uint256(reserve1), uint256(reserve0));
+        (uint256 amountBDesired, uint256 amountAMin, uint256 amountBMin) =
+            _getAddLiquidityParams(pair, USDC, amountADesired);
 
-        // 3. then calculate amountBDesired proportional to reserves of the pool
-        uint256 amountBDesired = IUniswapV2Router02(UNISWAP_V2_ROUTER).quote(amountADesired, reserveA, reserveB);
-
-        // 4. apply slippage to both min amounts to prevent revert
-        uint256 slippageBps = 50; // 0.5%
-        uint256 amountAMin = amountADesired * (10_000 - slippageBps) / 10_000;
-        uint256 amountBMin = amountBDesired * (10_000 - slippageBps) / 10_000;
-        // ---- end front simulation ----
-
-        // Finally execute addLiquidity function
-        deal(ARB, user, amountBDesired); // fund user with calculated ARB tokens
+        deal(ARB, user, amountBDesired);
         assert(IERC20(ARB).balanceOf(user) >= amountBDesired);
         IERC20(USDC).approve(address(dex), amountADesired);
         IERC20(ARB).approve(address(dex), amountBDesired);
@@ -108,88 +89,93 @@ contract CustomDEXTest is Test {
     }
 
     function testRemoveLiquidityOK() public {
-        // LP using USDC and ARB
-        address[] memory path = new address[](2);
-        path[0] = USDC;
-        path[1] = ARB;
-        uint256 amountADesired = 10 * 1e6; // 10 USDC paired with ? ARB
-
         vm.startPrank(user);
-        /* FIRST ADD LIQUIDITY TO GET LP TOKENS IN USDC/ARB POOL */
 
-        // ---- This is what a frontend would do to calculate each parameter for addLiquidity() function ----
-        // 1. first find the pair
+        uint256 amountADesired = 10 * 1e6; // 10 USDC paired with ? ARB
         address pair = IUniswapV2Factory(UNISWAP_V2_FACTORY).getPair(USDC, ARB);
         assert(pair != address(0));
 
-        // 2. then read reserves and order by tokenA/tokenB (getReserves() order can be different)
-        (uint256 reserveA, uint256 reserveB) = _getReserves(pair, USDC);
-
-        // 3. then calculate amountBDesired proportional to reserves of the pool
-        uint256 amountBDesired = IUniswapV2Router02(UNISWAP_V2_ROUTER).quote(amountADesired, reserveA, reserveB);
-
-        // 4. apply slippage to both min amounts to prevent revert
-        uint256 slippageBps = 50; // 0.5%
-        uint256 amountAMin = amountADesired * (10_000 - slippageBps) / 10_000;
-        uint256 amountBMin = amountBDesired * (10_000 - slippageBps) / 10_000;
-        // ---- end front simulation ----
-
-        // Finally execute addLiquidity function
-        deal(ARB, user, amountBDesired); // fund user with calculated ARB tokens
-        assert(IERC20(ARB).balanceOf(user) >= amountBDesired);
-        IERC20(USDC).approve(address(dex), amountADesired);
-        IERC20(ARB).approve(address(dex), amountBDesired);
-
-        console.log("addLiquidity - amountADesired:", amountADesired);
-        console.log("addLiquidity - amountBDesired:", amountBDesired);
-
-        uint256 balABefore = IERC20(USDC).balanceOf(user);
-        uint256 balBBefore = IERC20(ARB).balanceOf(user);
-        uint256 lpTokens =
-            dex.addLiquidity(USDC, ARB, amountADesired, amountBDesired, amountAMin, amountBMin, block.timestamp + 300);
-        uint256 balAAfter = IERC20(USDC).balanceOf(user);
-        uint256 balBAfter = IERC20(ARB).balanceOf(user);
-
-        assert(lpTokens > 0);
-        assert(balABefore - balAAfter <= amountADesired);
-        assert(balBBefore - balBAfter <= amountBDesired);
-
-        /* THEN REMOVE ALL MY LP TOKENS FROM USDC/ARB POOL AND GET TOKENS BACK */
-        // ---- This is what a frontend would do to calculate each parameter for addLiquidity() function ----
-        // 1. first get the totalSupply of the pool
-        uint256 totalSupplyPair = IERC20(pair).totalSupply();
-
-        // 2. then read reserves and order by tokenA/tokenB (getReserves() order can be different)
-        (uint256 reserveActualA_, uint256 reserveActualB_) = _getReserves(pair, USDC);
-
-        // 3. get the proportional participation of the pool based on LP tokens
-        uint256 expectedAmountA = (reserveActualA_ * lpTokens) / totalSupplyPair;
-        uint256 expectedAmountB = (reserveActualB_ * lpTokens) / totalSupplyPair;
-
-        console.log("removeLiquidity - reserveActualA:", reserveActualA_);
-        console.log("removeLiquidity - reserveActualB:", reserveActualB_);
-        console.log("removeLiquidity - expectedAmountA:", expectedAmountA);
-        console.log("removeLiquidity - expectedAmountB:", expectedAmountB);
-
-        // 4. apply slippage to both min amounts to prevent revert
-        uint256 amountAMinRemove = (expectedAmountA * (10_000 - slippageBps)) / 10_000;
-        uint256 amountBMinRemove = (expectedAmountB * (10_000 - slippageBps)) / 10_000;
-
-        IERC20(pair).approve(address(dex), lpTokens);
+        (,,, uint256 lpTokens) = _addLiquidityForUser(pair, amountADesired);
 
         uint256 balABeforeRemoveLP = IERC20(USDC).balanceOf(user);
         uint256 balBBeforeRemoveLP = IERC20(ARB).balanceOf(user);
-        (uint256 amountA_, uint256 amountB_) =
-            dex.removeLiquidity(USDC, ARB, lpTokens, amountAMinRemove, amountBMinRemove, block.timestamp + 300);
+        (uint256 amountA_, uint256 amountB_) = _removeLiquidityForUser(pair, lpTokens, USDC);
         uint256 balAAfterRemoveLP = IERC20(USDC).balanceOf(user);
         uint256 balBAfterRemoveLP = IERC20(ARB).balanceOf(user);
 
         assert(amountA_ > 0);
         assert(amountB_ > 0);
-        assertEq(balAAfterRemoveLP - balABeforeRemoveLP, amountA_, "USDC received should match the return of removeLiquidity");
-        assertEq(balBAfterRemoveLP - balBBeforeRemoveLP, amountB_, "ARB received should match the return of removeLiquidity");
+        assertEq(
+            balAAfterRemoveLP - balABeforeRemoveLP, amountA_, "USDC received should match the return of removeLiquidity"
+        );
+        assertEq(
+            balBAfterRemoveLP - balBBeforeRemoveLP, amountB_, "ARB received should match the return of removeLiquidity"
+        );
 
         vm.stopPrank();
+    }
+
+    function _getAddLiquidityParams(address pair, address tokenA, uint256 amountADesired)
+        internal
+        view
+        returns (uint256 amountBDesired, uint256 amountAMin, uint256 amountBMin)
+    {
+        // ---- This is what a frontend would do to calculate each parameter for addLiquidity() function ----
+        // 1. first find the pair (already done by caller)
+        // 2. then read reserves and order by tokenA/tokenB (getReserves() order can be different)
+        (uint256 reserveA, uint256 reserveB) = _getReserves(pair, tokenA);
+
+        // 3. then calculate amountBDesired proportional to reserves of the pool
+        amountBDesired = IUniswapV2Router02(UNISWAP_V2_ROUTER).quote(amountADesired, reserveA, reserveB);
+
+        // 4. apply slippage to both min amounts to prevent revert
+        uint256 slippageBps = 50; // 0.5%
+        amountAMin = amountADesired * (10_000 - slippageBps) / 10_000;
+        amountBMin = amountBDesired * (10_000 - slippageBps) / 10_000;
+        // ---- end front simulation ----
+    }
+
+    function _addLiquidityForUser(address pair, uint256 amountADesired)
+        internal
+        returns (uint256 amountBDesired, uint256 amountAMin, uint256 amountBMin, uint256 lpTokens)
+    {
+        // This helper keeps the main test function shallow enough for Solidity stack limits.
+        // The math here matches the same frontend simulation described in the earlier version.
+        (amountBDesired, amountAMin, amountBMin) = _getAddLiquidityParams(pair, USDC, amountADesired);
+        deal(ARB, user, amountBDesired);
+        assert(IERC20(ARB).balanceOf(user) >= amountBDesired);
+        IERC20(USDC).approve(address(dex), amountADesired);
+        IERC20(ARB).approve(address(dex), amountBDesired);
+
+        lpTokens =
+            dex.addLiquidity(USDC, ARB, amountADesired, amountBDesired, amountAMin, amountBMin, block.timestamp + 300);
+    }
+
+    function _removeLiquidityForUser(address pair, uint256 lpTokens, address tokenA)
+        internal
+        returns (uint256 amountA_, uint256 amountB_)
+    {
+        // ---- This is what a frontend would do to calculate each parameter for removeLiquidity() function ----
+        // 1. first get the totalSupply of the pool
+        uint256 totalSupplyPair = IERC20(pair).totalSupply();
+
+        // 2. then read reserves and order by tokenA/tokenB (getReserves() order can be different)
+        (uint256 reserveActualA_, uint256 reserveActualB_) = _getReserves(pair, tokenA);
+
+        // 3. get the proportional participation of the pool based on LP tokens
+        uint256 expectedAmountA = (reserveActualA_ * lpTokens) / totalSupplyPair;
+        uint256 expectedAmountB = (reserveActualB_ * lpTokens) / totalSupplyPair;
+
+        // 4. apply slippage to both min amounts to prevent revert
+        uint256 slippageBps = 50; // 0.5%
+        uint256 amountAMinRemove = (expectedAmountA * (10_000 - slippageBps)) / 10_000;
+        uint256 amountBMinRemove = (expectedAmountB * (10_000 - slippageBps)) / 10_000;
+
+        IERC20(pair).approve(address(dex), lpTokens);
+
+        (amountA_, amountB_) =
+            dex.removeLiquidity(tokenA, ARB, lpTokens, amountAMinRemove, amountBMinRemove, block.timestamp + 300);
+        // ---- end front simulation ----
     }
 
     // Helper to not repeat the ordering of reserves
