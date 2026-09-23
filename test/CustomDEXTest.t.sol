@@ -20,10 +20,8 @@ contract CustomDEXTest is Test {
     address constant USDC = 0xaf88d065e77c8cC2239327C5EDb3A432268e5831; // USDC in Arbitrum Mainnet (6 decimals)
     address constant ARB = 0x912CE59144191C1204E64559FE8253a0e49E6548; // ARB in Arbitrum Mainnet (18 decimals)
 
-    address constant NFT_DAVID_COLLECTION = 0x10604f011040Fa287a7f3B73d97d7099Cb9116bA;
-
     function setUp() public {
-        dex = new CustomDEX(UNISWAP_V2_ROUTER, UNISWAP_V2_FACTORY, NFT_DAVID_COLLECTION);
+        dex = new CustomDEX(UNISWAP_V2_ROUTER, UNISWAP_V2_FACTORY);
     }
 
     function testDeployOK() public view {

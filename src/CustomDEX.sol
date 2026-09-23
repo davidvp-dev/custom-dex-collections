@@ -25,11 +25,6 @@ contract CustomDEX {
     address public immutable UNISWAP_V2_FACTORY_ADDRESS;
 
     /**
-     * @notice Address of the NFT collection associated with this deployment.
-     */
-    address public immutable nftDavidCollection;
-
-    /**
      * @notice Emitted when tokens are swapped through the configured router.
      */
     event SwapTokens(address indexed tokenIn, address indexed tokenOut, uint256 amountIn, uint256 amountOut);
@@ -47,13 +42,12 @@ contract CustomDEX {
     /**
      * @notice Initializes the DEX with a Uniswap V2 router and an NFT collection address.
      * @param uniswapV2RouterAddress_ Address of the Uniswap V2 router to use.
-     * @param nftDavidCollection_ Address of the associated NFT collection.
+     * @param uniswapV2FactoryAddress_ Address of the Uniswap V2 factory.
      */
-    constructor(address uniswapV2RouterAddress_, address uniswapV2FactoryAddress_, address nftDavidCollection_) {
-        require(uniswapV2RouterAddress_ != address(0) && uniswapV2FactoryAddress_ != address(0) && nftDavidCollection_ != address(0), "Zero address");
+    constructor(address uniswapV2RouterAddress_, address uniswapV2FactoryAddress_) {
+        require(uniswapV2RouterAddress_ != address(0) && uniswapV2FactoryAddress_ != address(0), "Zero address");
         UNISWAP_V2_FACTORY_ADDRESS = uniswapV2FactoryAddress_;
         UNISWAP_V2_ROUTER_ADDRESS = uniswapV2RouterAddress_;
-        nftDavidCollection = nftDavidCollection_;
     }
 
     /**
