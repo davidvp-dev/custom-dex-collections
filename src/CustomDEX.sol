@@ -37,7 +37,9 @@ contract CustomDEX {
     /**
      * @notice Emitted when liquidity is removed and LP tokens are burned to get the tokens back.
      */
-    event RemoveLPTokens(address indexed tokenA, address indexed tokenB, uint256 liquidity, uint256 amountA, uint256 amountB);
+    event RemoveLPTokens(
+        address indexed tokenA, address indexed tokenB, uint256 liquidity, uint256 amountA, uint256 amountB
+    );
 
     /**
      * @notice Initializes the DEX with a Uniswap V2 router and an NFT collection address.
@@ -143,7 +145,7 @@ contract CustomDEX {
 
         (amountA_, amountB_) = IUniswapV2Router02(UNISWAP_V2_ROUTER_ADDRESS)
             .removeLiquidity(tokenA_, tokenB_, liquidity_, amountAMin_, amountBMin_, msg.sender, deadline_);
-        
+
         emit RemoveLPTokens(tokenA_, tokenB_, liquidity_, amountA_, amountB_);
     }
 }
