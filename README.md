@@ -89,10 +89,8 @@ function removeLiquidity(
 
 ## Execution example
 
-> Pending deployment — this section will be completed once `CustomDEX` is live on a testnet/mainnet.
-
-- Network: `<NETWORK>` (Arbitrum)
-- CustomDEX address: `<CONTRACT_ADDRESS>`
+- Network: Arbitrum Mainnet
+- CustomDEX address: [`0xa1CE0640b2aA1803E23162A4Dc2DD227F43051Cf`](https://arbiscan.io/address/0xa1ce0640b2aa1803e23162a4dc2dd227f43051cf)
 - Uniswap V2 Router: `0x4752ba5DBc23f44D87826276BF6Fd6b1C372aD24`
 - Uniswap V2 Factory: `0xf1D7CC64Fb4452F05c498126312eBE29f30Fbcf9`
 
@@ -121,18 +119,18 @@ To check coverage:
 forge coverage --fork-url https://arb1.arbitrum.io/rpc
 ```
 
-<!-- Paste your coverage table here once available -->
-```
-<COVERAGE_TABLE>
-```
+The suite passes with full coverage on the core contract:
+
+| File | % Lines | % Statements | % Branches | % Funcs |
+|---|---|---|---|---|
+| `src/CustomDEX.sol` | 100.00% (28/28) | 100.00% (26/26) | 100.00% (6/6) | 100.00% (4/4) |
+| **Total** | **100.00% (28/28)** | **100.00% (26/26)** | **100.00% (6/6)** | **100.00% (4/4)** |
 
 ## Contract addresses
 
-> To be completed once deployed.
-
 | Contract | Network | Address | Explorer |
 |---|---|---|---|
-| `CustomDEX.sol` | `<NETWORK>` | `<ADDRESS>` | `<EXPLORER_LINK>` |
+| `CustomDEX.sol` | Arbitrum Mainnet | `0xa1CE0640b2aA1803E23162A4Dc2DD227F43051Cf` | [Arbiscan](https://arbiscan.io/address/0xa1ce0640b2aa1803e23162a4dc2dd227f43051cf) |
 
 ## License
 

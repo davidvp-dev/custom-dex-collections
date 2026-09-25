@@ -29,6 +29,11 @@ contract CustomDEXTest is Test {
         assertEq(dex.UNISWAP_V2_FACTORY_ADDRESS(), UNISWAP_V2_FACTORY);
     }
 
+    function testConstructorKO_RevertsIfBothAreZero() public {
+        vm.expectRevert(bytes("Zero address"));
+        new CustomDEX(address(0), address(0));
+    }
+
     function testSwapOK() public {
         // 0. Setup variables for the test
         address[] memory path = new address[](2);
@@ -86,6 +91,66 @@ contract CustomDEXTest is Test {
         vm.stopPrank();
     }
 
+    function testAddLiquidityOK_RefundsExcessTokenB() public {
+        vm.startPrank(user);
+
+        address pair = IUniswapV2Factory(UNISWAP_V2_FACTORY).getPair(USDC, ARB);
+        (uint256 rA, uint256 rB) = _getReserves(pair, USDC);
+
+        uint256 amountADesired = 10 * 1e6;
+        uint256 bOptimal = amountADesired * rB / rA; // lo que usará el router
+        uint256 amountBDesired = bOptimal * 2; // enviamos el doble → sobra B
+
+        deal(ARB, user, amountBDesired);
+        IERC20(USDC).approve(address(dex), amountADesired);
+        IERC20(ARB).approve(address(dex), amountBDesired);
+
+        uint256 balABefore = IERC20(USDC).balanceOf(user);
+        uint256 balBBefore = IERC20(ARB).balanceOf(user);
+
+        uint256 lpTokens = dex.addLiquidity(
+            USDC, ARB, amountADesired, amountBDesired, amountADesired, bOptimal, block.timestamp + 300
+        );
+
+        assertGt(lpTokens, 0);
+        assertEq(balABefore - IERC20(USDC).balanceOf(user), amountADesired);
+        assertEq(balBBefore - IERC20(ARB).balanceOf(user), bOptimal);
+        assertEq(IERC20(USDC).balanceOf(address(dex)), 0);
+        assertEq(IERC20(ARB).balanceOf(address(dex)), 0);
+
+        vm.stopPrank();
+    }
+
+    function testAddLiquidityOK_RefundsExcessTokenA() public {
+        vm.startPrank(user);
+
+        address pair = IUniswapV2Factory(UNISWAP_V2_FACTORY).getPair(USDC, ARB);
+        (uint256 rA, uint256 rB) = _getReserves(pair, USDC);
+
+        uint256 amountBDesired = (10 * 1e6) * rB / rA;
+        uint256 amountADesired = 20 * 1e6;
+        uint256 aOptimal = amountBDesired * rA / rB;
+
+        deal(ARB, user, amountBDesired);
+        IERC20(USDC).approve(address(dex), amountADesired);
+        IERC20(ARB).approve(address(dex), amountBDesired);
+
+        uint256 balABefore = IERC20(USDC).balanceOf(user);
+        uint256 balBBefore = IERC20(ARB).balanceOf(user);
+
+        uint256 lpTokens = dex.addLiquidity(
+            USDC, ARB, amountADesired, amountBDesired, aOptimal, amountBDesired, block.timestamp + 300
+        );
+
+        assertGt(lpTokens, 0);
+        assertEq(balABefore - IERC20(USDC).balanceOf(user), aOptimal);
+        assertEq(balBBefore - IERC20(ARB).balanceOf(user), amountBDesired);
+        assertEq(IERC20(USDC).balanceOf(address(dex)), 0);
+        assertEq(IERC20(ARB).balanceOf(address(dex)), 0);
+
+        vm.stopPrank();
+    }
+
     function testRemoveLiquidityOK() public {
         vm.startPrank(user);
 
@@ -109,6 +174,16 @@ contract CustomDEXTest is Test {
         assertEq(
             balBAfterRemoveLP - balBBeforeRemoveLP, amountB_, "ARB received should match the return of removeLiquidity"
         );
+
+        vm.stopPrank();
+    }
+
+    function testRemoveLiquidityKO_pairNotFound() public {
+        vm.startPrank(user);
+        address unexistentToken = vm.addr(1);
+
+        vm.expectRevert("Pair not found");
+        dex.removeLiquidity(unexistentToken, ARB, 10, 0, 0, block.timestamp + 300);
 
         vm.stopPrank();
     }
