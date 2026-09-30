@@ -6,37 +6,24 @@ import { IUniswapV2Router02 } from "./interfaces/IUniswapV2Router02.sol";
 import { IUniswapV2Factory } from "./interfaces/IUniswapV2Factory.sol";
 import { IERC20 } from "../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { SafeERC20 } from "../lib/openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol";
+import { ReentrancyGuard } from "../lib/openzeppelin-contracts/contracts/utils/ReentrancyGuard.sol";
 
 /**
  * @title Custom DEX
  * @notice Provides token swaps and liquidity deposits through a Uniswap V2 router.
  */
-contract CustomDEX {
+contract CustomDEX is ReentrancyGuard {
     using SafeERC20 for IERC20;
 
-    /**
-     * @notice Address of the Uniswap V2 router used for swaps and liquidity operations.
-     */
-    address public immutable UNISWAP_V2_ROUTER_ADDRESS;
+    uint256 public feeBps = 100; //1% fees
+    uint256 public constant MAX_FEE_BPS = 500; //5% max fees
+    address public feeRecipient;
 
-    /**
-     * @notice Address of the Uniswap V2 factory used for getting pair addresses.
-     */
+    address public immutable UNISWAP_V2_ROUTER_ADDRESS;
     address public immutable UNISWAP_V2_FACTORY_ADDRESS;
 
-    /**
-     * @notice Emitted when tokens are swapped through the configured router.
-     */
     event SwapTokens(address indexed tokenIn, address indexed tokenOut, uint256 amountIn, uint256 amountOut);
-
-    /**
-     * @notice Emitted when liquidity is added and LP tokens are minted for the caller.
-     */
     event AddLPTokens(address indexed tokenA_, address indexed tokenB_, uint256 lpTokensAmount);
-
-    /**
-     * @notice Emitted when liquidity is removed and LP tokens are burned to get the tokens back.
-     */
     event RemoveLPTokens(
         address indexed tokenA, address indexed tokenB, uint256 liquidity, uint256 amountA, uint256 amountB
     );
@@ -50,6 +37,7 @@ contract CustomDEX {
         require(uniswapV2RouterAddress_ != address(0) && uniswapV2FactoryAddress_ != address(0), "Zero address");
         UNISWAP_V2_FACTORY_ADDRESS = uniswapV2FactoryAddress_;
         UNISWAP_V2_ROUTER_ADDRESS = uniswapV2RouterAddress_;
+        feeRecipient = msg.sender;
     }
 
     /**
@@ -71,6 +59,8 @@ contract CustomDEX {
         amountsOut = IUniswapV2Router02(UNISWAP_V2_ROUTER_ADDRESS)
             .swapExactTokensForTokens(amountIn_, amountOutMin_, path_, msg.sender, deadline_);
 
+        // uint256 protocolFee = (amountsOut[amountsOut.length - 1] * feeBps) / 10_000;
+        
         emit SwapTokens(path_[0], path_[path_.length - 1], amountIn_, amountsOut[amountsOut.length - 1]);
     }
 
@@ -148,4 +138,39 @@ contract CustomDEX {
 
         emit RemoveLPTokens(tokenA_, tokenB_, liquidity_, amountA_, amountB_);
     }
+
+    function swapEthForERC20Tokens(uint256 amountOutMin, address[] calldata path, uint256 deadline)
+        external
+        payable
+        nonReentrant
+        returns (uint256[] memory amounts)
+    {
+        require(msg.value > 0, "Please provide a valid ETH amount");
+        amounts = IUniswapV2Router02(UNISWAP_V2_ROUTER_ADDRESS).swapExactETHForTokens{ value: msg.value }(
+            amountOutMin, path, msg.sender, deadline
+        );
+        // IERC20(path[path.length - 1]).safeTransfer(msg.sender, amounts[amounts.length - 1]);
+    }
+
+    function swapERC20TokensForEth(
+        uint256 amountIn_,
+        uint256 amountOutMin_,
+        address[] calldata path_,
+        uint256 deadline_
+    ) external nonReentrant returns (uint256[] memory amounts) {
+        require(amountIn_ > 0, "Please provide a valid amount");
+        IERC20(path_[0]).safeTransferFrom(msg.sender, address(this), amountIn_);
+        IERC20(path_[0]).forceApprove(UNISWAP_V2_ROUTER_ADDRESS, amountIn_);
+
+        amounts = IUniswapV2Router02(UNISWAP_V2_ROUTER_ADDRESS)
+            .swapExactTokensForETH(amountIn_, amountOutMin_, path_, msg.sender, deadline_);
+
+        // uint256 ethAmount = amounts[amounts.length - 1];
+        // (bool success,) = msg.sender.call{ value: ethAmount }("");
+        // require(success, "Transfer ETH amount to the user failed");
+    }
+
+    // function _applyFeeAndForwardTransaction() internal {
+
+    // }
 }

@@ -19,6 +19,7 @@ contract CustomDEXTest is Test {
     address user = 0x8a53B8b59877df193C6dAE7B8D1d38251af563Cf; // Address with USDC in Arbitrum Mainnet
     address constant USDC = 0xaf88d065e77c8cC2239327C5EDb3A432268e5831; // USDC in Arbitrum Mainnet (6 decimals)
     address constant ARB = 0x912CE59144191C1204E64559FE8253a0e49E6548; // ARB in Arbitrum Mainnet (18 decimals)
+    address constant WETH = 0x82aF49447D8a07e3bd95BD0d56f35241523fBab1; // ETH in Arbitrum Mainnet (18 decimals)
 
     function setUp() public {
         dex = new CustomDEX(UNISWAP_V2_ROUTER, UNISWAP_V2_FACTORY);
@@ -184,6 +185,91 @@ contract CustomDEXTest is Test {
 
         vm.expectRevert("Pair not found");
         dex.removeLiquidity(unexistentToken, ARB, 10, 0, 0, block.timestamp + 300);
+
+        vm.stopPrank();
+    }
+
+    function testSwapEthForERC20TokensOK() public {
+        vm.startPrank(user);
+        vm.deal(user, 1 ether);
+        // 0. Setup variables for the test
+        address[] memory path = new address[](2);
+        path[0] = WETH;
+        path[1] = USDC;
+        uint256 amountIn = 0.1 ether;
+
+        // simulate what the front would to: off-chain query the expected result
+        uint256[] memory expectedAmounts = IUniswapV2Router02(UNISWAP_V2_ROUTER).getAmountsOut(amountIn, path);
+        uint256 expectedOut = expectedAmounts[expectedAmounts.length - 1];
+
+        // apply slippage tolerance same as front would do
+        uint256 amountOutMin = (expectedOut * 995) / 1000; // 0.5% slippage
+
+        uint256 usdcBalBefore = IERC20(USDC).balanceOf(user);
+        dex.swapEthForERC20Tokens{ value: amountIn }(amountOutMin, path, block.timestamp + 300);
+        uint256 usdcBalAfter = IERC20(USDC).balanceOf(user);
+
+        assert(usdcBalAfter - usdcBalBefore >= amountOutMin);
+
+        vm.stopPrank();
+    }
+
+    function testSwapEthForERC20TokensKO_invalidMsgValue() public {
+        vm.startPrank(user);
+        vm.deal(user, 1 ether);
+        // 0. Setup variables for the test
+        address[] memory path = new address[](2);
+        path[0] = WETH;
+        path[1] = USDC;
+        uint256 amountIn = 0.1 ether;
+
+        // simulate what the front would to: off-chain query the expected result
+        uint256[] memory expectedAmounts = IUniswapV2Router02(UNISWAP_V2_ROUTER).getAmountsOut(amountIn, path);
+        uint256 expectedOut = expectedAmounts[expectedAmounts.length - 1];
+
+        // apply slippage tolerance same as front would do
+        uint256 amountOutMin = (expectedOut * 995) / 1000; // 0.5% slippage
+
+        vm.expectRevert("Please provide a valid ETH amount");
+        dex.swapEthForERC20Tokens(amountOutMin, path, block.timestamp + 300);
+
+        vm.stopPrank();
+    }
+
+    function testSwapERC20TokensForEthOK() public {
+        vm.startPrank(user);
+        // 0. Setup variables for the test
+        address[] memory path = new address[](2);
+        path[0] = USDC;
+        path[1] = WETH;
+        uint256 amountIn = 2800 * 1e6;
+
+        // simulate what the front would to: off-chain query the expected result
+        uint256[] memory expectedAmounts = IUniswapV2Router02(UNISWAP_V2_ROUTER).getAmountsOut(amountIn, path);
+        uint256 expectedOut = expectedAmounts[expectedAmounts.length - 1];
+
+        // apply slippage tolerance same as front would do
+        uint256 amountOutMin = (expectedOut * 995) / 1000; // 0.5% slippage
+        IERC20(USDC).approve(address(dex), amountIn);
+
+        uint256 ethBalBefore = user.balance;
+        dex.swapERC20TokensForEth(amountIn, amountOutMin, path, block.timestamp + 300);
+        uint256 ethBalAfter = user.balance;
+
+        assert(ethBalAfter - ethBalBefore >= amountOutMin);
+
+        vm.stopPrank();
+    }
+
+    function testSwapERC20TokensForEthKO_invalidAmountIn() public {
+        vm.startPrank(user);
+        // 0. Setup variables for the test
+        address[] memory path = new address[](2);
+        path[0] = USDC;
+        path[1] = WETH;
+
+        vm.expectRevert("Please provide a valid amount");
+        dex.swapERC20TokensForEth(0, 100, path, block.timestamp + 300);
 
         vm.stopPrank();
     }
