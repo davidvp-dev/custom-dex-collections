@@ -36,7 +36,7 @@ interface IUniswapV2Router02 {
         address to,
         uint256 deadline
     ) external returns (uint256[] memory amounts);
-    
+
     /**
      * @notice Adds token liquidity to a pair.
      * @param tokenA Address of the first token.

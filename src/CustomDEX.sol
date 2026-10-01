@@ -22,10 +22,12 @@ contract CustomDEX is ReentrancyGuard {
     address public immutable UNISWAP_V2_ROUTER_ADDRESS;
     address public immutable UNISWAP_V2_FACTORY_ADDRESS;
 
-    event SwapTokens(address indexed tokenIn, address indexed tokenOut, uint256 amountIn, uint256 amountOut);
-    event AddLPTokens(address indexed tokenA_, address indexed tokenB_, uint256 lpTokensAmount);
+    event SwapTokens(
+        address indexed tokenIn_, address indexed tokenOut_, uint256 amountIn_, uint256 amountOut_, uint256 protocolFee_
+    );
+    event AddLPTokens(address indexed tokenA_, address indexed tokenB_, uint256 lpTokensAmount_);
     event RemoveLPTokens(
-        address indexed tokenA, address indexed tokenB, uint256 liquidity, uint256 amountA, uint256 amountB
+        address indexed tokenA_, address indexed tokenB_, uint256 liquidity_, uint256 amountA_, uint256 amountB_
     );
 
     /**
@@ -33,35 +35,92 @@ contract CustomDEX is ReentrancyGuard {
      * @param uniswapV2RouterAddress_ Address of the Uniswap V2 router to use.
      * @param uniswapV2FactoryAddress_ Address of the Uniswap V2 factory.
      */
-    constructor(address uniswapV2RouterAddress_, address uniswapV2FactoryAddress_) {
-        require(uniswapV2RouterAddress_ != address(0) && uniswapV2FactoryAddress_ != address(0), "Zero address");
+    constructor(address uniswapV2RouterAddress_, address uniswapV2FactoryAddress_, address feeRecipient_) {
+        require(
+            uniswapV2RouterAddress_ != address(0) && uniswapV2FactoryAddress_ != address(0)
+                && feeRecipient_ != address(0),
+            "Zero address"
+        );
         UNISWAP_V2_FACTORY_ADDRESS = uniswapV2FactoryAddress_;
         UNISWAP_V2_ROUTER_ADDRESS = uniswapV2RouterAddress_;
-        feeRecipient = msg.sender;
+        feeRecipient = feeRecipient_;
     }
 
+    receive() external payable { }
+
     /**
-     * @notice Swaps an exact amount of input tokens for output tokens through Uniswap V2.
+     * @notice Swaps exact input tokens for output tokens through Uniswap V2, applying protocol fee.
      * @dev The caller must approve this contract to spend `amountIn_` of the first token in `path_`.
      * @param amountIn_ Exact amount of input tokens to swap.
      * @param amountOutMin_ Minimum acceptable amount of output tokens.
      * @param path_ Token path from input token to output token.
      * @param deadline_ Unix timestamp after which the swap must not execute.
-     * @return amountsOut Amounts received at each step of the swap path.
+     * @return amounts Same as Uniswap's amountsOut, except the last element is net of protocol fee.
      */
     function swapTokens(uint256 amountIn_, uint256 amountOutMin_, address[] memory path_, uint256 deadline_)
         external
-        returns (uint256[] memory amountsOut)
+        nonReentrant
+        returns (uint256[] memory amounts)
     {
+        require(amountIn_ > 0, "Invalid amount");
+
         IERC20(path_[0]).safeTransferFrom(msg.sender, address(this), amountIn_);
         IERC20(path_[0]).forceApprove(UNISWAP_V2_ROUTER_ADDRESS, amountIn_);
 
-        amountsOut = IUniswapV2Router02(UNISWAP_V2_ROUTER_ADDRESS)
-            .swapExactTokensForTokens(amountIn_, amountOutMin_, path_, msg.sender, deadline_);
+        amounts = IUniswapV2Router02(UNISWAP_V2_ROUTER_ADDRESS)
+            .swapExactTokensForTokens(amountIn_, amountOutMin_, path_, address(this), deadline_);
 
-        // uint256 protocolFee = (amountsOut[amountsOut.length - 1] * feeBps) / 10_000;
-        
-        emit SwapTokens(path_[0], path_[path_.length - 1], amountIn_, amountsOut[amountsOut.length - 1]);
+        address tokenOut_ = path_[path_.length - 1];
+        uint256 amountOut_ = amounts[amounts.length - 1];
+
+        (uint256 amountAfterFee_, uint256 protocolFee_) = _applyFeeAndForwardTokens(tokenOut_, msg.sender, amountOut_);
+
+        amounts[amounts.length - 1] = amountAfterFee_;
+
+        emit SwapTokens(path_[0], tokenOut_, amountIn_, amountAfterFee_, protocolFee_);
+    }
+
+    function swapEthForERC20Tokens(uint256 amountOutMin_, address[] calldata path_, uint256 deadline_)
+        external
+        payable
+        nonReentrant
+        returns (uint256[] memory amounts)
+    {
+        require(msg.value > 0, "Please provide a valid ETH amount");
+        amounts = IUniswapV2Router02(UNISWAP_V2_ROUTER_ADDRESS).swapExactETHForTokens{ value: msg.value }(
+            amountOutMin_, path_, address(this), deadline_
+        );
+
+        address tokenOut_ = path_[path_.length - 1];
+        uint256 amountOut_ = amounts[amounts.length - 1];
+
+        (uint256 amountAfterFee_, uint256 protocolFee_) = _applyFeeAndForwardTokens(tokenOut_, msg.sender, amountOut_);
+
+        amounts[amounts.length - 1] = amountAfterFee_;
+
+        emit SwapTokens(path_[0], tokenOut_, msg.value, amountAfterFee_, protocolFee_);
+    }
+
+    function swapERC20TokensForEth(
+        uint256 amountIn_,
+        uint256 amountOutMin_,
+        address[] calldata path_,
+        uint256 deadline_
+    ) external nonReentrant returns (uint256[] memory amounts) {
+        require(amountIn_ > 0, "Please provide a valid amount");
+        IERC20(path_[0]).safeTransferFrom(msg.sender, address(this), amountIn_);
+        IERC20(path_[0]).forceApprove(UNISWAP_V2_ROUTER_ADDRESS, amountIn_);
+
+        amounts = IUniswapV2Router02(UNISWAP_V2_ROUTER_ADDRESS)
+            .swapExactTokensForETH(amountIn_, amountOutMin_, path_, address(this), deadline_);
+
+        uint256 ethAmount_ = amounts[amounts.length - 1];
+
+        (uint256 amountAfterFee_, uint256 protocolFee_) = _applyFeeAndForwardEth(msg.sender, ethAmount_);
+
+        amounts[amounts.length - 1] = amountAfterFee_;
+
+        emit SwapTokens(path_[0], address(0), amountIn_, amountAfterFee_, protocolFee_); // address(0) is native ETH
     }
 
     /**
@@ -139,38 +198,31 @@ contract CustomDEX is ReentrancyGuard {
         emit RemoveLPTokens(tokenA_, tokenB_, liquidity_, amountA_, amountB_);
     }
 
-    function swapEthForERC20Tokens(uint256 amountOutMin, address[] calldata path, uint256 deadline)
-        external
-        payable
-        nonReentrant
-        returns (uint256[] memory amounts)
+    function _applyFeeAndForwardTokens(address token_, address user_, uint256 amountIn_)
+        internal
+        returns (uint256 amountAfterFee_, uint256 protocolFee_)
     {
-        require(msg.value > 0, "Please provide a valid ETH amount");
-        amounts = IUniswapV2Router02(UNISWAP_V2_ROUTER_ADDRESS).swapExactETHForTokens{ value: msg.value }(
-            amountOutMin, path, msg.sender, deadline
-        );
-        // IERC20(path[path.length - 1]).safeTransfer(msg.sender, amounts[amounts.length - 1]);
+        protocolFee_ = (amountIn_ * feeBps) / 10_000;
+        amountAfterFee_ = amountIn_ - protocolFee_;
+
+        if (protocolFee_ > 0) {
+            IERC20(token_).safeTransfer(feeRecipient, protocolFee_);
+        }
+        IERC20(token_).safeTransfer(user_, amountAfterFee_);
     }
 
-    function swapERC20TokensForEth(
-        uint256 amountIn_,
-        uint256 amountOutMin_,
-        address[] calldata path_,
-        uint256 deadline_
-    ) external nonReentrant returns (uint256[] memory amounts) {
-        require(amountIn_ > 0, "Please provide a valid amount");
-        IERC20(path_[0]).safeTransferFrom(msg.sender, address(this), amountIn_);
-        IERC20(path_[0]).forceApprove(UNISWAP_V2_ROUTER_ADDRESS, amountIn_);
+    function _applyFeeAndForwardEth(address user_, uint256 amountIn_)
+        internal
+        returns (uint256 amountAfterFee_, uint256 protocolFee_)
+    {
+        protocolFee_ = (amountIn_ * feeBps) / 10_000;
+        amountAfterFee_ = amountIn_ - protocolFee_;
 
-        amounts = IUniswapV2Router02(UNISWAP_V2_ROUTER_ADDRESS)
-            .swapExactTokensForETH(amountIn_, amountOutMin_, path_, msg.sender, deadline_);
-
-        // uint256 ethAmount = amounts[amounts.length - 1];
-        // (bool success,) = msg.sender.call{ value: ethAmount }("");
-        // require(success, "Transfer ETH amount to the user failed");
+        if (protocolFee_ > 0) {
+            (bool feeSuccess,) = feeRecipient.call{ value: protocolFee_ }("");
+            require(feeSuccess, "ETH fee transfer failed.");
+        }
+        (bool userSuccess,) = user_.call{ value: amountAfterFee_ }("");
+        require(userSuccess, "ETH transfer to user failed.");
     }
-
-    // function _applyFeeAndForwardTransaction() internal {
-
-    // }
 }

@@ -13,7 +13,6 @@ import { IUniswapV2Factory } from "../src/interfaces/IUniswapV2Factory.sol";
 import { IUniswapV2Pair } from "../src/interfaces/IUniswapV2Pair.sol";
 
 contract CustomDEXSmokeTest is Test {
-
     CustomDEX dex;
     address constant USDC = 0xaf88d065e77c8cC2239327C5EDb3A432268e5831; // USDC in Arbitrum Mainnet (6 decimals)
     address constant ARB = 0x912CE59144191C1204E64559FE8253a0e49E6548; // ARB in Arbitrum Mainnet (18 decimals)
@@ -22,7 +21,7 @@ contract CustomDEXSmokeTest is Test {
     function setUp() public {
         // do the testings against the forked network in anvil
         vm.createSelectFork("http://127.0.0.1:8545");
-        dex = CustomDEX(0xa1CE0640b2aA1803E23162A4Dc2DD227F43051Cf);
+        dex = CustomDEX(payable(0xa1CE0640b2aA1803E23162A4Dc2DD227F43051Cf));
     }
 
     function test_deployedContractIsWired() public view {
@@ -38,7 +37,8 @@ contract CustomDEXSmokeTest is Test {
         uint256 amountIn = 10 * 1e6; // swap 10 USDC
 
         // simulate what the front would to: off-chain query the expected result
-        uint256[] memory expectedAmounts = IUniswapV2Router02(dex.UNISWAP_V2_ROUTER_ADDRESS()).getAmountsOut(amountIn, path);
+        uint256[] memory expectedAmounts =
+            IUniswapV2Router02(dex.UNISWAP_V2_ROUTER_ADDRESS()).getAmountsOut(amountIn, path);
         uint256 expectedOut = expectedAmounts[expectedAmounts.length - 1];
 
         // apply slippage tolerance same as front would do

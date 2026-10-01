@@ -14,25 +14,28 @@ import { IUniswapV2Pair } from "../src/interfaces/IUniswapV2Pair.sol";
 
 contract CustomDEXTest is Test {
     CustomDEX dex;
+    address feeRecipient = 0xD5C7C9f4E570a489cD5BF3CC676B0bD020EBa40f;
+    address user = 0x8a53B8b59877df193C6dAE7B8D1d38251af563Cf; // Address with USDC in Arbitrum Mainnet
+
     address constant UNISWAP_V2_ROUTER = 0x4752ba5DBc23f44D87826276BF6Fd6b1C372aD24;
     address constant UNISWAP_V2_FACTORY = 0xf1D7CC64Fb4452F05c498126312eBE29f30Fbcf9;
-    address user = 0x8a53B8b59877df193C6dAE7B8D1d38251af563Cf; // Address with USDC in Arbitrum Mainnet
     address constant USDC = 0xaf88d065e77c8cC2239327C5EDb3A432268e5831; // USDC in Arbitrum Mainnet (6 decimals)
     address constant ARB = 0x912CE59144191C1204E64559FE8253a0e49E6548; // ARB in Arbitrum Mainnet (18 decimals)
     address constant WETH = 0x82aF49447D8a07e3bd95BD0d56f35241523fBab1; // ETH in Arbitrum Mainnet (18 decimals)
 
     function setUp() public {
-        dex = new CustomDEX(UNISWAP_V2_ROUTER, UNISWAP_V2_FACTORY);
+        dex = new CustomDEX(UNISWAP_V2_ROUTER, UNISWAP_V2_FACTORY, feeRecipient);
     }
 
     function testDeployOK() public view {
         assertEq(dex.UNISWAP_V2_ROUTER_ADDRESS(), UNISWAP_V2_ROUTER);
         assertEq(dex.UNISWAP_V2_FACTORY_ADDRESS(), UNISWAP_V2_FACTORY);
+        assertEq(dex.feeRecipient(), feeRecipient);
     }
 
     function testConstructorKO_RevertsIfBothAreZero() public {
         vm.expectRevert(bytes("Zero address"));
-        new CustomDEX(address(0), address(0));
+        new CustomDEX(address(0), address(0), address(0));
     }
 
     function testSwapOK() public {
@@ -54,11 +57,104 @@ contract CustomDEXTest is Test {
         IERC20(USDC).approve(address(dex), amountIn);
 
         uint256 arbBalBefore = IERC20(ARB).balanceOf(user);
+        uint256 arbBalFeeRecipientBefore = IERC20(ARB).balanceOf(feeRecipient);
         dex.swapTokens(amountIn, amountOutMin, path, block.timestamp + 300);
         uint256 arbBalAfter = IERC20(ARB).balanceOf(user);
+        uint256 arbBalFeeRecipientAfter = IERC20(ARB).balanceOf(feeRecipient);
 
-        assert(arbBalBefore == 0);
-        assert(arbBalAfter >= amountOutMin);
+        assert(arbBalAfter + arbBalFeeRecipientAfter - arbBalBefore >= amountOutMin);
+        assert(arbBalFeeRecipientAfter > arbBalFeeRecipientBefore);
+
+        vm.stopPrank();
+    }
+
+    function testSwapEthForERC20TokensOK() public {
+        vm.startPrank(user);
+        vm.deal(user, 1 ether);
+        // 0. Setup variables for the test
+        address[] memory path = new address[](2);
+        path[0] = WETH;
+        path[1] = USDC;
+        uint256 amountIn = 0.1 ether;
+
+        // simulate what the front would to: off-chain query the expected result
+        uint256[] memory expectedAmounts = IUniswapV2Router02(UNISWAP_V2_ROUTER).getAmountsOut(amountIn, path);
+        uint256 expectedOut = expectedAmounts[expectedAmounts.length - 1];
+
+        // apply slippage tolerance same as front would do
+        uint256 amountOutMin = (expectedOut * 995) / 1000; // 0.5% slippage
+
+        uint256 usdcBalBefore = IERC20(USDC).balanceOf(user);
+        uint256 usdcBalFeeRecipientBefore = IERC20(USDC).balanceOf(feeRecipient);
+        dex.swapEthForERC20Tokens{ value: amountIn }(amountOutMin, path, block.timestamp + 300);
+        uint256 usdcBalAfter = IERC20(USDC).balanceOf(user);
+        uint256 usdcBalFeeRecipientAfter = IERC20(USDC).balanceOf(feeRecipient);
+
+        assert(usdcBalAfter + usdcBalFeeRecipientAfter - usdcBalBefore >= amountOutMin);
+        assert(usdcBalFeeRecipientAfter > usdcBalFeeRecipientBefore);
+
+        vm.stopPrank();
+    }
+
+    function testSwapEthForERC20TokensKO_invalidMsgValue() public {
+        vm.startPrank(user);
+        vm.deal(user, 1 ether);
+        // 0. Setup variables for the test
+        address[] memory path = new address[](2);
+        path[0] = WETH;
+        path[1] = USDC;
+        uint256 amountIn = 0.1 ether;
+
+        // simulate what the front would to: off-chain query the expected result
+        uint256[] memory expectedAmounts = IUniswapV2Router02(UNISWAP_V2_ROUTER).getAmountsOut(amountIn, path);
+        uint256 expectedOut = expectedAmounts[expectedAmounts.length - 1];
+
+        // apply slippage tolerance same as front would do
+        uint256 amountOutMin = (expectedOut * 995) / 1000; // 0.5% slippage
+
+        vm.expectRevert("Please provide a valid ETH amount");
+        dex.swapEthForERC20Tokens(amountOutMin, path, block.timestamp + 300);
+
+        vm.stopPrank();
+    }
+
+    function testSwapERC20TokensForEthOK() public {
+        vm.startPrank(user);
+        // 0. Setup variables for the test
+        address[] memory path = new address[](2);
+        path[0] = USDC;
+        path[1] = WETH;
+        uint256 amountIn = 2800 * 1e6;
+
+        // simulate what the front would to: off-chain query the expected result
+        uint256[] memory expectedAmounts = IUniswapV2Router02(UNISWAP_V2_ROUTER).getAmountsOut(amountIn, path);
+        uint256 expectedOut = expectedAmounts[expectedAmounts.length - 1];
+
+        // apply slippage tolerance same as front would do
+        uint256 amountOutMin = (expectedOut * 995) / 1000; // 0.5% slippage
+        IERC20(USDC).approve(address(dex), amountIn);
+
+        uint256 ethBalBefore = user.balance;
+        uint256 ethBalFeeRecipientBefore = feeRecipient.balance;
+        dex.swapERC20TokensForEth(amountIn, amountOutMin, path, block.timestamp + 300);
+        uint256 ethBalAfter = user.balance;
+        uint256 ethBalFeeRecipientAfter = feeRecipient.balance;
+
+        assert(ethBalAfter + ethBalFeeRecipientAfter - ethBalBefore >= amountOutMin);
+        assert(ethBalFeeRecipientAfter > ethBalFeeRecipientBefore);
+
+        vm.stopPrank();
+    }
+
+    function testSwapERC20TokensForEthKO_invalidAmountIn() public {
+        vm.startPrank(user);
+        // 0. Setup variables for the test
+        address[] memory path = new address[](2);
+        path[0] = USDC;
+        path[1] = WETH;
+
+        vm.expectRevert("Please provide a valid amount");
+        dex.swapERC20TokensForEth(0, 100, path, block.timestamp + 300);
 
         vm.stopPrank();
     }
@@ -185,91 +281,6 @@ contract CustomDEXTest is Test {
 
         vm.expectRevert("Pair not found");
         dex.removeLiquidity(unexistentToken, ARB, 10, 0, 0, block.timestamp + 300);
-
-        vm.stopPrank();
-    }
-
-    function testSwapEthForERC20TokensOK() public {
-        vm.startPrank(user);
-        vm.deal(user, 1 ether);
-        // 0. Setup variables for the test
-        address[] memory path = new address[](2);
-        path[0] = WETH;
-        path[1] = USDC;
-        uint256 amountIn = 0.1 ether;
-
-        // simulate what the front would to: off-chain query the expected result
-        uint256[] memory expectedAmounts = IUniswapV2Router02(UNISWAP_V2_ROUTER).getAmountsOut(amountIn, path);
-        uint256 expectedOut = expectedAmounts[expectedAmounts.length - 1];
-
-        // apply slippage tolerance same as front would do
-        uint256 amountOutMin = (expectedOut * 995) / 1000; // 0.5% slippage
-
-        uint256 usdcBalBefore = IERC20(USDC).balanceOf(user);
-        dex.swapEthForERC20Tokens{ value: amountIn }(amountOutMin, path, block.timestamp + 300);
-        uint256 usdcBalAfter = IERC20(USDC).balanceOf(user);
-
-        assert(usdcBalAfter - usdcBalBefore >= amountOutMin);
-
-        vm.stopPrank();
-    }
-
-    function testSwapEthForERC20TokensKO_invalidMsgValue() public {
-        vm.startPrank(user);
-        vm.deal(user, 1 ether);
-        // 0. Setup variables for the test
-        address[] memory path = new address[](2);
-        path[0] = WETH;
-        path[1] = USDC;
-        uint256 amountIn = 0.1 ether;
-
-        // simulate what the front would to: off-chain query the expected result
-        uint256[] memory expectedAmounts = IUniswapV2Router02(UNISWAP_V2_ROUTER).getAmountsOut(amountIn, path);
-        uint256 expectedOut = expectedAmounts[expectedAmounts.length - 1];
-
-        // apply slippage tolerance same as front would do
-        uint256 amountOutMin = (expectedOut * 995) / 1000; // 0.5% slippage
-
-        vm.expectRevert("Please provide a valid ETH amount");
-        dex.swapEthForERC20Tokens(amountOutMin, path, block.timestamp + 300);
-
-        vm.stopPrank();
-    }
-
-    function testSwapERC20TokensForEthOK() public {
-        vm.startPrank(user);
-        // 0. Setup variables for the test
-        address[] memory path = new address[](2);
-        path[0] = USDC;
-        path[1] = WETH;
-        uint256 amountIn = 2800 * 1e6;
-
-        // simulate what the front would to: off-chain query the expected result
-        uint256[] memory expectedAmounts = IUniswapV2Router02(UNISWAP_V2_ROUTER).getAmountsOut(amountIn, path);
-        uint256 expectedOut = expectedAmounts[expectedAmounts.length - 1];
-
-        // apply slippage tolerance same as front would do
-        uint256 amountOutMin = (expectedOut * 995) / 1000; // 0.5% slippage
-        IERC20(USDC).approve(address(dex), amountIn);
-
-        uint256 ethBalBefore = user.balance;
-        dex.swapERC20TokensForEth(amountIn, amountOutMin, path, block.timestamp + 300);
-        uint256 ethBalAfter = user.balance;
-
-        assert(ethBalAfter - ethBalBefore >= amountOutMin);
-
-        vm.stopPrank();
-    }
-
-    function testSwapERC20TokensForEthKO_invalidAmountIn() public {
-        vm.startPrank(user);
-        // 0. Setup variables for the test
-        address[] memory path = new address[](2);
-        path[0] = USDC;
-        path[1] = WETH;
-
-        vm.expectRevert("Please provide a valid amount");
-        dex.swapERC20TokensForEth(0, 100, path, block.timestamp + 300);
 
         vm.stopPrank();
     }
