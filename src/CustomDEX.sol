@@ -31,9 +31,10 @@ contract CustomDEX is ReentrancyGuard {
     );
 
     /**
-     * @notice Initializes the DEX with a Uniswap V2 router and an NFT collection address.
+     * @notice Initializes the DEX with a Uniswap V2 router, factory, and protocol fee recipient.
      * @param uniswapV2RouterAddress_ Address of the Uniswap V2 router to use.
      * @param uniswapV2FactoryAddress_ Address of the Uniswap V2 factory.
+     * @param feeRecipient_ Address that receives protocol fees.
      */
     constructor(address uniswapV2RouterAddress_, address uniswapV2FactoryAddress_, address feeRecipient_) {
         require(
@@ -46,6 +47,9 @@ contract CustomDEX is ReentrancyGuard {
         feeRecipient = feeRecipient_;
     }
 
+    /**
+     * @notice Receives native ETH sent directly to the contract.
+     */
     receive() external payable { }
 
     /**
@@ -80,6 +84,13 @@ contract CustomDEX is ReentrancyGuard {
         emit SwapTokens(path_[0], tokenOut_, amountIn_, amountAfterFee_, protocolFee_);
     }
 
+    /**
+     * @notice Swaps the supplied native ETH for ERC20 tokens through Uniswap V2, applying the protocol fee.
+     * @param amountOutMin_ Minimum acceptable amount of output tokens before the protocol fee.
+     * @param path_ Token path from the wrapped native token to the output token.
+     * @param deadline_ Unix timestamp after which the swap must not execute.
+     * @return amounts Same as Uniswap's amountsOut, except the last element is net of protocol fee.
+     */
     function swapEthForERC20Tokens(uint256 amountOutMin_, address[] calldata path_, uint256 deadline_)
         external
         payable
@@ -101,6 +112,15 @@ contract CustomDEX is ReentrancyGuard {
         emit SwapTokens(path_[0], tokenOut_, msg.value, amountAfterFee_, protocolFee_);
     }
 
+    /**
+     * @notice Swaps exact input ERC20 tokens for native ETH through Uniswap V2, applying the protocol fee.
+     * @dev The caller must approve this contract to spend `amountIn_` of the first token in `path_`.
+     * @param amountIn_ Exact amount of input tokens to swap.
+     * @param amountOutMin_ Minimum acceptable amount of native ETH before the protocol fee.
+     * @param path_ Token path from the input token to the wrapped native token.
+     * @param deadline_ Unix timestamp after which the swap must not execute.
+     * @return amounts Same as Uniswap's amountsOut, except the last element is net of protocol fee.
+     */
     function swapERC20TokensForEth(
         uint256 amountIn_,
         uint256 amountOutMin_,
@@ -198,6 +218,14 @@ contract CustomDEX is ReentrancyGuard {
         emit RemoveLPTokens(tokenA_, tokenB_, liquidity_, amountA_, amountB_);
     }
 
+    /**
+     * @notice Deducts the protocol fee from an ERC20 amount and forwards the fee and remainder.
+     * @param token_ Address of the output token.
+     * @param user_ Address receiving the amount after fees.
+     * @param amountIn_ Gross amount of output tokens before the protocol fee.
+     * @return amountAfterFee_ Amount of tokens forwarded to the user.
+     * @return protocolFee_ Amount of tokens forwarded to the fee recipient.
+     */
     function _applyFeeAndForwardTokens(address token_, address user_, uint256 amountIn_)
         internal
         returns (uint256 amountAfterFee_, uint256 protocolFee_)
@@ -211,6 +239,13 @@ contract CustomDEX is ReentrancyGuard {
         IERC20(token_).safeTransfer(user_, amountAfterFee_);
     }
 
+    /**
+     * @notice Deducts the protocol fee from a native ETH amount and forwards the fee and remainder.
+     * @param user_ Address receiving the amount after fees.
+     * @param amountIn_ Gross amount of native ETH before the protocol fee.
+     * @return amountAfterFee_ Amount of ETH forwarded to the user.
+     * @return protocolFee_ Amount of ETH forwarded to the fee recipient.
+     */
     function _applyFeeAndForwardEth(address user_, uint256 amountIn_)
         internal
         returns (uint256 amountAfterFee_, uint256 protocolFee_)
