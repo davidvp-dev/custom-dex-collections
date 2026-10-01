@@ -275,6 +275,39 @@ contract CustomDEXTest is Test {
         vm.stopPrank();
     }
 
+    function testSetFeeBpsOK() public {
+        address owner = dex.owner();
+        vm.startPrank(owner);
+        uint256 newFeeBps_ = 200; //2% fee
+        dex.setFeeBps(newFeeBps_);
+        vm.stopPrank();
+    }
+
+    function testSetFeeBpsKO_feeExceedsMax() public {
+        address owner = dex.owner();
+        vm.startPrank(owner);
+        uint256 newFeeBps_ = dex.MAX_FEE_BPS() + 1;
+        vm.expectRevert("Fee exceeds max");
+        dex.setFeeBps(newFeeBps_);
+        vm.stopPrank();
+    }
+
+    function testSetFeeRecipientOK() public {
+        address owner = dex.owner();
+        vm.startPrank(owner);
+        address newRecipient = vm.addr(1);
+        dex.setFeeRecipient(newRecipient);
+        vm.stopPrank();
+    }
+
+    function testSetFeeRecipientKO_zeroAddress() public {
+        address owner = dex.owner();
+        vm.startPrank(owner);
+        vm.expectRevert("The recipient must be a valid address");
+        dex.setFeeRecipient(address(0));
+        vm.stopPrank();
+    }
+
     function testRemoveLiquidityKO_pairNotFound() public {
         vm.startPrank(user);
         address unexistentToken = vm.addr(1);

@@ -7,12 +7,13 @@ import { IUniswapV2Factory } from "./interfaces/IUniswapV2Factory.sol";
 import { IERC20 } from "../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { SafeERC20 } from "../lib/openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol";
 import { ReentrancyGuard } from "../lib/openzeppelin-contracts/contracts/utils/ReentrancyGuard.sol";
+import { Ownable2Step, Ownable } from "../lib/openzeppelin-contracts/contracts/access/Ownable2Step.sol";
 
 /**
  * @title Custom DEX
  * @notice Provides token swaps and liquidity deposits through a Uniswap V2 router.
  */
-contract CustomDEX is ReentrancyGuard {
+contract CustomDEX is ReentrancyGuard, Ownable2Step {
     using SafeERC20 for IERC20;
 
     uint256 public feeBps = 100; //1% fees
@@ -29,6 +30,8 @@ contract CustomDEX is ReentrancyGuard {
     event RemoveLPTokens(
         address indexed tokenA_, address indexed tokenB_, uint256 liquidity_, uint256 amountA_, uint256 amountB_
     );
+    event FeeRecipientUpdated(address indexed oldRecipient, address indexed newRecipient);
+    event FeeBpsUpdated(uint256 oldFeeBps, uint256 newFeeBps);
 
     /**
      * @notice Initializes the DEX with a Uniswap V2 router, factory, and protocol fee recipient.
@@ -36,7 +39,9 @@ contract CustomDEX is ReentrancyGuard {
      * @param uniswapV2FactoryAddress_ Address of the Uniswap V2 factory.
      * @param feeRecipient_ Address that receives protocol fees.
      */
-    constructor(address uniswapV2RouterAddress_, address uniswapV2FactoryAddress_, address feeRecipient_) {
+    constructor(address uniswapV2RouterAddress_, address uniswapV2FactoryAddress_, address feeRecipient_)
+        Ownable(msg.sender)
+    {
         require(
             uniswapV2RouterAddress_ != address(0) && uniswapV2FactoryAddress_ != address(0)
                 && feeRecipient_ != address(0),
@@ -216,6 +221,28 @@ contract CustomDEX is ReentrancyGuard {
             .removeLiquidity(tokenA_, tokenB_, liquidity_, amountAMin_, amountBMin_, msg.sender, deadline_);
 
         emit RemoveLPTokens(tokenA_, tokenB_, liquidity_, amountA_, amountB_);
+    }
+
+    /**
+     * @notice Updates the address that receives the protocol fee.
+     * @dev Only the contract owner can change the fee recipient.
+     * @param newRecipient_ Address that will receive future protocol fees.
+     */
+    function setFeeRecipient(address newRecipient_) external onlyOwner {
+        require(newRecipient_ != address(0), "The recipient must be a valid address");
+        emit FeeRecipientUpdated(feeRecipient, newRecipient_);
+        feeRecipient = newRecipient_;
+    }
+
+    /**
+     * @notice Updates the protocol fee percentage used in swaps.
+     * @dev Only the contract owner can change the fee rate; the value cannot exceed `MAX_FEE_BPS`.
+     * @param newFeeBps_ New fee rate in basis points, where 100 = 1%.
+     */
+    function setFeeBps(uint256 newFeeBps_) external onlyOwner {
+        require(newFeeBps_ <= MAX_FEE_BPS, "Fee exceeds max");
+        emit FeeBpsUpdated(feeBps, newFeeBps_);
+        feeBps = newFeeBps_;
     }
 
     /**
